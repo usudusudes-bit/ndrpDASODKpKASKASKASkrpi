@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import bcrypt from 'bcrypt';
 import { Rcon } from 'rcon-client';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,6 +15,12 @@ app.use(cors());
 app.use(express.json());
 
 const dbPath = process.env.DB_PATH || 'hotland.db';
+const dbDir = path.dirname(dbPath);
+
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const db = new Database(dbPath);
 
 // Инициализация таблиц
