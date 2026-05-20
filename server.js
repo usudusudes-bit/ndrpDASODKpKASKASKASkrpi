@@ -92,7 +92,7 @@ try {
 // Вспомогательная функция для ответов
 const handleReq = (handler) => async (req, res) => {
   try {
-    const result = await handler(req.body);
+    const result = await handler(req.body, req);
     res.json({ result });
   } catch (err) {
     res.status(400).json({ error: err.message || err });
@@ -193,17 +193,22 @@ app.post('/api/delete_promocode', handleReq(({ id }) => {
   return 'Промокод удален';
 }));
 
-app.post('/api/create_payment', handleReq(async ({ username, email, coupon, products }) => {
+app.post('/api/create_payment', handleReq(async ({ username, email, coupon, products }, req) => {
   const settings = db.prepare('SELECT shop_key, server_id FROM easydonate_settings LIMIT 1').get();
   if (!settings || !settings.shop_key || !settings.server_id) {
     throw new Error('Настройки EasyDonate не заданы в админ-панели');
   }
 
+  // Динамически определяем текущий домен сайта для возврата после оплаты
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers.host;
+  const currentUrl = `${protocol}://${host}/`;
+
   const queryParams = new URLSearchParams({
     customer: username,
     server_id: settings.server_id,
     products: JSON.stringify(products),
-    success_url: 'http://hotland.site/' // Замените на реальный адрес при деплое
+    success_url: currentUrl
   });
 
   if (email) queryParams.append('email', email);
