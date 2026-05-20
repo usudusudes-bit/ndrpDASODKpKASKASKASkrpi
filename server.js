@@ -14,14 +14,26 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const dbPath = process.env.DB_PATH || 'hotland.db';
+const dbPath = process.env.DB_PATH || path.join(__dirname, 'hotland.db');
 const dbDir = path.dirname(dbPath);
 
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+try {
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+} catch (error) {
+  console.warn(`[Warning] Could not create directory ${dbDir}: ${error.message}. Will try to use fallback directory.`);
 }
 
-const db = new Database(dbPath);
+let db;
+try {
+  db = new Database(dbPath);
+} catch (error) {
+  console.error(`[Error] Failed to create database at ${dbPath}: ${error.message}`);
+  const fallbackPath = path.join(__dirname, 'hotland.db');
+  console.log(`[Info] Falling back to local database: ${fallbackPath}`);
+  db = new Database(fallbackPath);
+}
 
 // Инициализация таблиц
 db.exec(`
