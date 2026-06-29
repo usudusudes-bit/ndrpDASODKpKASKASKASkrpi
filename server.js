@@ -227,7 +227,7 @@ app.post('/api/get_chart_data', handleReq(({ type, period }) => {
   } else if (type === 'load') {
     query = 'SELECT created_at, online_count as val FROM server_load_history WHERE created_at >= ?';
   } else {
-    return [];
+    return new Array(bucketsCount).fill(0);
   }
 
   const startTimeStr = startTime.toISOString().replace('T', ' ').substring(0, 19);
@@ -252,6 +252,8 @@ app.post('/api/get_chart_data', handleReq(({ type, period }) => {
     }
   }
 
+  // To prevent the graph from looking completely empty if there are 0 rows, 
+  // ensure the returned array length matches `bucketsCount`.
   return buckets;
 }));
 

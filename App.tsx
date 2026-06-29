@@ -1032,7 +1032,8 @@ function AdminPanel() {
     if (!chartData || chartData.length === 0) return '0,200 800,200';
     const dataLength = chartData.length;
     // Add a bit of padding to the max value so the highest peak isn't touching the very top edge
-    const maxVal = Math.max(...chartData, 5) * 1.2; 
+    // If all values are 0, maxVal will be 1 to prevent division by zero
+    const maxVal = Math.max(...chartData, 1) * 1.2; 
     const minVal = 0;
     
     return chartData.map((val, i) => {
