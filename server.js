@@ -239,7 +239,7 @@ app.post('/api/make_purchase', handleReq(({ username, item, duration, price }) =
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Catch-all route для SPA (чтобы работал React Router и перезагрузка страниц)
-app.get('/(.*)', (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
