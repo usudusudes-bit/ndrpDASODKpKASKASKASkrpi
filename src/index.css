@@ -4,7 +4,7 @@
 
 @layer base {
   body {
-    @apply text-blue-900 overflow-x-hidden bg-[#e0f2fe];
+    @apply text-blue-900 overflow-x-hidden bg-[#e0f2fe] dark:bg-[#0a0a0a] dark:text-white transition-colors duration-300;
     font-family: 'Inter', sans-serif;
   }
 }

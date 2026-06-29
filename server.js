@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'dist')));
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, 'hotland.db');
 const dbDir = path.dirname(dbPath);
@@ -234,11 +235,11 @@ app.post('/api/make_purchase', handleReq(({ username, item, duration, price }) =
   return 'Покупка успешно добавлена';
 }));
 
-// Раздача статических файлов фронтенда в продакшене
+// Раздача статических файлов фронтенда в продакшене (основная)
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// Catch-all route для SPA
-app.use((req, res) => {
+// Catch-all route для SPA (чтобы работал React Router и перезагрузка страниц)
+app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
