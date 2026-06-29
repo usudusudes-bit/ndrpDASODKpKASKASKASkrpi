@@ -85,6 +85,25 @@ function App({ defaultTab = 'main' }: { defaultTab?: string }) {
   const [openRuleIndex, setOpenRuleIndex] = useState<number | null>(null);
 
   useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      if (e.target instanceof HTMLImageElement) {
+        e.preventDefault();
+      }
+    };
+    const handleDragStart = (e: DragEvent) => {
+      if (e.target instanceof HTMLImageElement) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('dragstart', handleDragStart);
+    return () => {
+      document.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('dragstart', handleDragStart);
+    };
+  }, []);
+
+  useEffect(() => {
     if (loggedInUser) {
       localStorage.setItem('loggedInUser', loggedInUser);
     } else {
@@ -320,6 +339,8 @@ function App({ defaultTab = 'main' }: { defaultTab?: string }) {
           </div>
           <input
             type="text"
+            name="global_search_dummy"
+            autoComplete="off"
             placeholder="Поиск товаров..."
             value={searchQuery}
             onChange={(e) => {
@@ -982,10 +1003,18 @@ function AdminPanel() {
   const [easydonateServerId, setEasydonateServerId] = useState('');
   const [users, setUsers] = useState<any[]>([]);
   const [promos, setPromos] = useState<any[]>([]);
+  const [globalDiscounts, setGlobalDiscounts] = useState<any[]>([]);
   const [promoPercentage, setPromoPercentage] = useState<number>(0);
   const [promoUses, setPromoUses] = useState<number>(1);
+  const [promoExpiresAt, setPromoExpiresAt] = useState<string>('');
+  
+  const [gdName, setGdName] = useState<string>('');
+  const [gdPercentage, setGdPercentage] = useState<number>(0);
+  const [gdExpiresAt, setGdExpiresAt] = useState<string>('');
+
   const [selectedUserForGift, setSelectedUserForGift] = useState<any>(null);
   const [chartPeriod, setChartPeriod] = useState<'1d' | '3d' | '7d'>('1d');
+  const [chartType, setChartType] = useState<'load' | 'purchases' | 'traffic'>('load');
 
   const loadPoints = useMemo(() => {
     let dataLength = 12;
@@ -1021,6 +1050,13 @@ function AdminPanel() {
     } catch (e) { console.error(e); }
   };
 
+  const fetchGlobalDiscounts = async () => {
+    try {
+      const res = await customInvoke('get_global_discounts');
+      setGlobalDiscounts(res);
+    } catch (e) { console.error(e); }
+  };
+
   const fetchRcon = async () => {
     try {
       const res = await customInvoke('get_rcon');
@@ -1052,6 +1088,7 @@ function AdminPanel() {
     fetchStats();
     fetchUsers();
     fetchPromos();
+    fetchGlobalDiscounts();
     fetchRcon();
     fetchEasydonate();
   }, []);
@@ -1073,7 +1110,9 @@ function AdminPanel() {
 
   const handleGeneratePromo = async () => {
     try {
-      await customInvoke('generate_promocode', { uses: promoUses, percentage: promoPercentage });
+      const payload: any = { uses: promoUses, percentage: promoPercentage };
+      if (promoExpiresAt) payload.expires_at = new Date(promoExpiresAt).toISOString();
+      await customInvoke('generate_promocode', payload);
       fetchPromos();
     } catch (e) { alert(e); }
   };
@@ -1082,6 +1121,22 @@ function AdminPanel() {
     try {
       await customInvoke('delete_promocode', { id });
       fetchPromos();
+    } catch (e) { alert(e); }
+  };
+
+  const handleAddGlobalDiscount = async () => {
+    try {
+      const payload: any = { name: gdName || 'Скидка', percentage: gdPercentage };
+      if (gdExpiresAt) payload.expires_at = new Date(gdExpiresAt).toISOString();
+      await customInvoke('add_global_discount', payload);
+      fetchGlobalDiscounts();
+    } catch (e) { alert(e); }
+  };
+
+  const handleDeleteGlobalDiscount = async (id: number) => {
+    try {
+      await customInvoke('delete_global_discount', { id });
+      fetchGlobalDiscounts();
     } catch (e) { alert(e); }
   };
 
@@ -1105,6 +1160,7 @@ function AdminPanel() {
           { id: 'rcon', name: 'RCON', icon: Database },
           { id: 'easydonate', name: 'EasyDonate', icon: ShoppingBag },
           { id: 'promo', name: 'Промокоды', icon: Gift },
+          { id: 'global_discounts', name: 'Глобальные скидки', icon: Star },
           { id: 'users', name: 'Пользователи', icon: Users }
         ].map(t => (
           <button
@@ -1131,7 +1187,15 @@ function AdminPanel() {
             </div>
             <div className="col-span-1 md:col-span-2 bg-orange-50 dark:bg-dark-800 p-6 rounded-2xl border border-orange-100 dark:border-dark-700">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-orange-600 dark:text-gray-400 font-medium">Нагрузка на сайт</h3>
+                <select 
+                  value={chartType} 
+                  onChange={(e) => setChartType(e.target.value as any)}
+                  className="bg-transparent text-orange-600 dark:text-gray-400 font-medium text-lg focus:outline-none cursor-pointer border-b border-orange-200 dark:border-dark-700 pb-1"
+                >
+                  <option value="load">Нагрузка на сайт</option>
+                  <option value="purchases">Покупки</option>
+                  <option value="traffic">Посещаемость</option>
+                </select>
                 <div className="flex gap-2 bg-white dark:bg-dark-900 p-1 rounded-lg border border-orange-200 dark:border-dark-700">
                   <button onClick={() => setChartPeriod('1d')} className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${chartPeriod === '1d' ? 'bg-orange-100 dark:bg-dark-700 text-orange-950 dark:text-white' : 'text-orange-600 dark:text-gray-400 hover:bg-orange-50 dark:hover:bg-dark-800'}`}>1 день</button>
                   <button onClick={() => setChartPeriod('3d')} className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${chartPeriod === '3d' ? 'bg-orange-100 dark:bg-dark-700 text-orange-950 dark:text-white' : 'text-orange-600 dark:text-gray-400 hover:bg-orange-50 dark:hover:bg-dark-800'}`}>3 дня</button>
@@ -1243,6 +1307,10 @@ function AdminPanel() {
                 <label className="block text-sm text-orange-800 dark:text-gray-300 mb-1">Процент скидки (%)</label>
                 <input type="number" min="0" max="100" value={promoPercentage} onChange={e => setPromoPercentage(parseInt(e.target.value) || 0)} className="bg-white dark:bg-dark-800 border border-orange-200 dark:border-dark-700 rounded-xl py-2 px-4 text-orange-950 dark:text-white w-32" />
               </div>
+              <div>
+                <label className="block text-sm text-orange-800 dark:text-gray-300 mb-1">Срок действия (необяз.)</label>
+                <input type="datetime-local" value={promoExpiresAt} onChange={e => setPromoExpiresAt(e.target.value)} className="bg-white dark:bg-dark-800 border border-orange-200 dark:border-dark-700 rounded-xl py-2 px-4 text-orange-950 dark:text-white" />
+              </div>
               <button onClick={handleGeneratePromo} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-xl">
                 Сгенерировать
               </button>
@@ -1264,6 +1332,58 @@ function AdminPanel() {
                     <span className="text-sm text-orange-600 dark:text-gray-400">Использований: {p.uses_left}</span>
                     {p.percentage > 0 && <span className="text-sm text-green-600 font-bold">-{p.percentage}%</span>}
                   </div>
+                  {p.expires_at && (
+                    <div className="text-xs text-orange-500 dark:text-gray-500 mt-1">
+                      До: {new Date(p.expires_at).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'global_discounts' && (
+          <div>
+            <div className="flex gap-4 mb-6 items-end flex-wrap">
+              <div>
+                <label className="block text-sm text-orange-800 dark:text-gray-300 mb-1">Название</label>
+                <input type="text" value={gdName} onChange={e => setGdName(e.target.value)} placeholder="Летняя распродажа" className="bg-white dark:bg-dark-800 border border-orange-200 dark:border-dark-700 rounded-xl py-2 px-4 text-orange-950 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm text-orange-800 dark:text-gray-300 mb-1">Скидка (%)</label>
+                <input type="number" min="0" max="100" value={gdPercentage} onChange={e => setGdPercentage(parseInt(e.target.value) || 0)} className="bg-white dark:bg-dark-800 border border-orange-200 dark:border-dark-700 rounded-xl py-2 px-4 text-orange-950 dark:text-white w-32" />
+              </div>
+              <div>
+                <label className="block text-sm text-orange-800 dark:text-gray-300 mb-1">Срок действия (необяз.)</label>
+                <input type="datetime-local" value={gdExpiresAt} onChange={e => setGdExpiresAt(e.target.value)} className="bg-white dark:bg-dark-800 border border-orange-200 dark:border-dark-700 rounded-xl py-2 px-4 text-orange-950 dark:text-white" />
+              </div>
+              <button onClick={handleAddGlobalDiscount} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-xl">
+                Добавить
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {globalDiscounts.map(gd => (
+                <div key={gd.id} className="bg-white dark:bg-dark-800 p-4 rounded-xl border border-orange-200 dark:border-dark-700 flex flex-col justify-between items-start gap-2 relative group shadow-sm">
+                  <div className="flex justify-between w-full items-center">
+                    <span className="font-medium text-lg text-orange-950 dark:text-white">{gd.name}</span>
+                    <button 
+                      onClick={() => handleDeleteGlobalDiscount(gd.id)}
+                      className="text-gray-400 dark:text-gray-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Удалить скидку"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="flex justify-between w-full">
+                    <span className="text-sm text-orange-600 dark:text-gray-400">Глобальная скидка</span>
+                    {gd.percentage > 0 && <span className="text-sm text-green-600 font-bold">-{gd.percentage}%</span>}
+                  </div>
+                  {gd.expires_at && (
+                    <div className="text-xs text-orange-500 dark:text-gray-500 mt-1">
+                      До: {new Date(gd.expires_at).toLocaleString()}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
