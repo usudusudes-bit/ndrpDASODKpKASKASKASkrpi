@@ -52,6 +52,15 @@ db.exec(`
       code TEXT NOT NULL UNIQUE,
       uses_left INTEGER DEFAULT 1,
       percentage INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS global_discounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      percentage INTEGER NOT NULL,
+      expires_at TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -76,10 +85,27 @@ db.exec(`
       price TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS server_load_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      online_count INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS site_visits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 try {
   db.exec('ALTER TABLE promocodes ADD COLUMN percentage INTEGER DEFAULT 0;');
+} catch (e) {
+  // column already exists
+}
+
+try {
+  db.exec('ALTER TABLE promocodes ADD COLUMN expires_at TEXT;');
 } catch (e) {
   // column already exists
 }
@@ -179,19 +205,91 @@ app.post('/api/get_stats', handleReq(() => {
   return JSON.stringify({ users, purchases });
 }));
 
-app.post('/api/generate_promocode', handleReq(({ uses, percentage }) => {
+app.post('/api/track_visit', handleReq(() => {
+  db.prepare('INSERT INTO site_visits DEFAULT VALUES').run();
+  return 'ok';
+}));
+
+app.post('/api/get_chart_data', handleReq(({ type, period }) => {
+  const now = new Date();
+  let startTime = new Date();
+  let bucketsCount = 24;
+
+  if (period === '1d') { startTime.setHours(now.getHours() - 24); bucketsCount = 24; }
+  else if (period === '3d') { startTime.setDate(now.getDate() - 3); bucketsCount = 36; }
+  else if (period === '7d') { startTime.setDate(now.getDate() - 7); bucketsCount = 84; }
+
+  let query = '';
+  if (type === 'purchases') {
+    query = 'SELECT created_at, 1 as val FROM purchases WHERE created_at >= ?';
+  } else if (type === 'traffic') {
+    query = 'SELECT created_at, 1 as val FROM site_visits WHERE created_at >= ?';
+  } else if (type === 'load') {
+    query = 'SELECT created_at, online_count as val FROM server_load_history WHERE created_at >= ?';
+  } else {
+    return [];
+  }
+
+  const startTimeStr = startTime.toISOString().replace('T', ' ').substring(0, 19);
+  const rows = db.prepare(query).all(startTimeStr);
+
+  const bucketSize = (now.getTime() - startTime.getTime()) / bucketsCount;
+  const buckets = new Array(bucketsCount).fill(0);
+  const counts = new Array(bucketsCount).fill(0);
+
+  rows.forEach(row => {
+    const rowTime = new Date(row.created_at.replace(' ', 'T') + 'Z').getTime();
+    const bucketIdx = Math.floor((rowTime - startTime.getTime()) / bucketSize);
+    if (bucketIdx >= 0 && bucketIdx < bucketsCount) {
+      buckets[bucketIdx] += row.val;
+      counts[bucketIdx]++;
+    }
+  });
+
+  if (type === 'load') {
+    for (let i = 0; i < bucketsCount; i++) {
+      if (counts[i] > 0) buckets[i] = Math.round(buckets[i] / counts[i]);
+    }
+  }
+
+  return buckets;
+}));
+
+const cleanupExpired = () => {
+  const now = new Date().toISOString();
+  db.prepare("DELETE FROM promocodes WHERE expires_at IS NOT NULL AND expires_at < ?").run(now);
+  db.prepare("DELETE FROM global_discounts WHERE expires_at IS NOT NULL AND expires_at < ?").run(now);
+};
+
+app.post('/api/generate_promocode', handleReq(({ uses, percentage, expires_at }) => {
   const code = Math.random().toString(36).substring(2, 10).toUpperCase();
-  db.prepare('INSERT INTO promocodes (code, uses_left, percentage) VALUES (?, ?, ?)').run(code, uses, percentage || 0);
+  db.prepare('INSERT INTO promocodes (code, uses_left, percentage, expires_at) VALUES (?, ?, ?, ?)').run(code, uses, percentage || 0, expires_at || null);
   return code;
 }));
 
 app.post('/api/get_promocodes', handleReq(() => {
-  return db.prepare('SELECT id, code, uses_left, percentage FROM promocodes').all();
+  cleanupExpired();
+  return db.prepare('SELECT id, code, uses_left, percentage, expires_at FROM promocodes').all();
 }));
 
 app.post('/api/delete_promocode', handleReq(({ id }) => {
   db.prepare('DELETE FROM promocodes WHERE id = ?').run(id);
   return 'Промокод удален';
+}));
+
+app.post('/api/add_global_discount', handleReq(({ name, percentage, expires_at }) => {
+  db.prepare('INSERT INTO global_discounts (name, percentage, expires_at) VALUES (?, ?, ?)').run(name || 'Скидка', percentage, expires_at || null);
+  return 'Глобальная скидка добавлена';
+}));
+
+app.post('/api/get_global_discounts', handleReq(() => {
+  cleanupExpired();
+  return db.prepare('SELECT id, name, percentage, expires_at FROM global_discounts').all();
+}));
+
+app.post('/api/delete_global_discount', handleReq(({ id }) => {
+  db.prepare('DELETE FROM global_discounts WHERE id = ?').run(id);
+  return 'Глобальная скидка удалена';
 }));
 
 app.post('/api/create_payment', handleReq(async ({ username, email, coupon, products }, req) => {
@@ -242,6 +340,30 @@ app.use(express.static(path.join(__dirname, 'dist')));
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
+
+// Background task to track server load
+setInterval(async () => {
+  try {
+    const rcon = db.prepare('SELECT host, port, password FROM rcon_settings LIMIT 1').get();
+    if (!rcon || !rcon.host) return;
+
+    const rconClient = await Rcon.connect({
+      host: rcon.host,
+      port: parseInt(rcon.port),
+      password: rcon.password
+    });
+    
+    const response = await rconClient.send("list");
+    rconClient.end();
+    
+    const match = response.match(/There are (\d+) of a max/);
+    const count = match ? parseInt(match[1]) : 0;
+    
+    db.prepare('INSERT INTO server_load_history (online_count) VALUES (?)').run(count);
+  } catch (e) {
+    // Silent fail for background task
+  }
+}, 5 * 60 * 1000); // Every 5 minutes
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {

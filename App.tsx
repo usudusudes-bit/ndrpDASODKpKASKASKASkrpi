@@ -143,6 +143,7 @@ function App({ defaultTab = 'main' }: { defaultTab?: string }) {
   }, [authMode, isAuthModalOpen])
 
   useEffect(() => {
+    customInvoke('track_visit').catch(() => {});
     const fetchOnline = async () => {
       try {
         const res = await customInvoke('rcon_online');
@@ -1015,19 +1016,32 @@ function AdminPanel() {
   const [selectedUserForGift, setSelectedUserForGift] = useState<any>(null);
   const [chartPeriod, setChartPeriod] = useState<'1d' | '3d' | '7d'>('1d');
   const [chartType, setChartType] = useState<'load' | 'purchases' | 'traffic'>('load');
+  const [chartData, setChartData] = useState<number[]>([]);
+
+  useEffect(() => {
+    const fetchChartData = async () => {
+      try {
+        const res = await customInvoke('get_chart_data', { type: chartType, period: chartPeriod });
+        setChartData(res);
+      } catch (e) { console.error(e); }
+    };
+    fetchChartData();
+  }, [chartType, chartPeriod]);
 
   const loadPoints = useMemo(() => {
-    let dataLength = 12;
-    if (chartPeriod === '3d') dataLength = 36;
-    if (chartPeriod === '7d') dataLength = 84;
-
-    const data = Array.from({ length: dataLength }, () => Math.floor(Math.random() * 100) + 40);
-    return data.map((y, i) => {
-      const x = (i * (800 / (dataLength - 1))).toFixed(1);
-      const variedY = (y + (Math.random() * 20 - 10)).toFixed(1);
-      return `${x},${variedY}`;
+    if (!chartData || chartData.length === 0) return '0,200 800,200';
+    const dataLength = chartData.length;
+    // Add a bit of padding to the max value so the highest peak isn't touching the very top edge
+    const maxVal = Math.max(...chartData, 5) * 1.2; 
+    const minVal = 0;
+    
+    return chartData.map((val, i) => {
+      const x = (i * (800 / Math.max(1, dataLength - 1))).toFixed(1);
+      // Ensure y fits between 20 and 200
+      const y = (200 - ((val - minVal) / (maxVal - minVal)) * 180).toFixed(1);
+      return `${x},${y}`;
     }).join(' ');
-  }, [chartPeriod]);
+  }, [chartData]);
 
   const fetchStats = async () => {
     try {
